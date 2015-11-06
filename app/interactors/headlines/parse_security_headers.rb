@@ -14,9 +14,14 @@ module Headlines
     private
 
     def response
-      @response ||= connection.get("/")
+      @response ||= get_or_post
     rescue Faraday::ClientError, URI::InvalidURIError, Errno::ETIMEDOUT
       @response = head_request
+    end
+
+    def get_or_post
+      response = connection.get("/")
+      response.success? ? response : connection.post("/")
     end
 
     def head_request
@@ -56,7 +61,7 @@ module Headlines
       Faraday.new(url: "http://#{context.url}", headers: request_headers, ssl: { verify: false }) do |builder|
         builder.request :url_encoded
         builder.response :logger
-        builder.use FaradayMiddleware::FollowRedirects, limit: 10
+        builder.use FaradayMiddleware::FollowRedirects, limit: 10, standards_compliant: true
         builder.adapter Faraday.default_adapter
       end
     end
