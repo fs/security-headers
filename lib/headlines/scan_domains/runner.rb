@@ -1,11 +1,9 @@
-require "faraday"
 require "typhoeus"
-require "typhoeus/adapters/faraday"
 
 module Headlines
   module ScanDomains
     class Runner
-      DEFAULT_BATCH_SIZE = 500
+      DEFAULT_BATCH_SIZE = 200
 
       def initialize(total_count, progressbar)
         @total_count = total_count
@@ -93,7 +91,7 @@ module Headlines
         if response.timed_out?
           error_message = "Timed out"
         elsif response.code == 0
-          error_message = "Zero code"
+          error_message = "Zero code: #{response.return_message}"
         else
           error_message = "Status: #{response.code}"
         end
