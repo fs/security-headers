@@ -5,7 +5,7 @@ require "typhoeus/adapters/faraday"
 module Headlines
   module ScanDomains
     class Runner
-      DEFAULT_BATCH_SIZE = 500
+      DEFAULT_BATCH_SIZE = 100
 
       def initialize(total_count, progressbar)
         @total_count = total_count
@@ -14,23 +14,7 @@ module Headlines
 
       def call
         Headlines::Domain.find_in_batches(batch_size: batch_size) do |domains|
-          responses = []
-
-          begin
-            connection.in_parallel do
-              domains.each do |domain|
-                responses << connection.get("http://#{domain.name}")
-
-                progressbar.increment
-              end
-            end
-          rescue StandardError => exception
-            failure_logger.info("  Unhandled exception: #{exception}")
-          end
-
-          responses.each do |response|
-            log_scan_result(0, response)
-          end
+          scan_domains(domains)
 
           break if progressbar.progress >= total_count
         end
@@ -44,15 +28,30 @@ module Headlines
         [DEFAULT_BATCH_SIZE, total_count].min
       end
 
-      def scan_domain(domain)
-        log_scan_result(domain.id, result)
-      end
+      def scan_domains(domains)
+        hydra = Typhoeus::Hydra.hydra
 
-       def connection
-         @connection ||= Faraday.new(headers: header_options, request: request_options) do |builder|
-            builder.request :url_encoded
-            builder.adapter :typhoeus
-         end
+        domains.each do |domain|
+          request = Typhoeus::Request.new(
+            "http://#{domain.name}",
+            followlocation: true,
+            maxredirs: 10,
+            timeout: 60,
+            connecttimeout: 10,
+            headers: header_options
+          )
+
+          request.on_complete do |response|
+            analyze_and_save(domain, response)
+          end
+
+          hydra.queue(request)
+          progressbar.increment
+        end
+
+        hydra.run
+      rescue StandardError => exception
+        failure_logger.info("Unhandled exception: #{exception}")
       end
 
       def header_options
@@ -64,36 +63,39 @@ module Headlines
         }
       end
 
-      def request_options
-        {
-          timeout: 30,
-          open_timeout: 10
-        }
+      def analyze_and_save(domain, response)
+        if response.success?
+          result = Headlines::AnalyzeDomainHeaders.call(url: domain.name, response: response)
+
+          if result.success?
+            domain.build_last_scan(scan_params(result).merge(domain_id: domain.id, ssl_enabled: result.ssl_enabled))
+            domain.save!
+          else
+            binding.pry
+            failure_logger.info("#{domain.label}: Failed to parse response")
+          end
+        end
+
+        log_scan_result(domain, response)
       end
-
-      # def scan_domain(domain)
-      #   result = Headlines::AnalyzeDomainHeaders.call(url: domain.name)
-      #   if result.success?
-      #     domain.build_last_scan(scan_params(result).merge(domain_id: domain.id, ssl_enabled: result.ssl_enabled))
-      #     domain.save!
-      #   end
-
-      #   log_scan_result(domain.id, result)
-      # end
 
       def scan_params(result)
         result[:params].slice(:headers, :results, :score, :http_score, :csp_score)
       end
 
-      def log_scan_result(index, result)
-        domain_name = result.env[:url]
-        scan_result = result.success? ? "success" : "failure"
-        logger.info("Domain #{domain_name} scan result: #{scan_result}")
-        return if result.success?
+      def log_scan_result(domain, response)
+        logger.info("#{domain.label} scan result: #{response.success? ? 'success' : 'failure'}")
+        return if response.success?
 
-        failure_logger.info("#{domain_name}")
-        failure_logger.info("  Status: #{result.status}") if result.status.present?
-        # failure_logger.info("  Errors: #{result.errors}") if result.errors.present?
+        if response.timed_out?
+          error_message = "Timed out"
+        elsif response.code == 0
+          error_message = "Zero code"
+        else
+          error_message = "Status: #{response.code}"
+        end
+
+        failure_logger.info("#{domain.label}: #{error_message}")
       end
 
       def logger
