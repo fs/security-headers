@@ -3,7 +3,7 @@ module Headlines
     include Interactor
 
     def call
-      unless response.success?
+      unless response.success? || response_ok?
         context.status = response.status
         context.fail!(message: I18n.t("errors.general"))
       end
@@ -38,6 +38,10 @@ module Headlines
       end
     end
 
+    def response_ok?
+      response.try(:code).present? ? response.try(:code) == 200 : true
+    end
+
     def parse_csp
       Headlines::SecurityHeaders::ContentSecurityPolicy.new(sanitized_headers, response.body, context.url)
     end
@@ -47,7 +51,7 @@ module Headlines
     end
 
     def security_headers
-      empty_headers_hash.merge(formatted_headers.slice(*headers_to_analyze))
+      empty_headers_hash.merge!(formatted_headers.slice(*headers_to_analyze))
     end
 
     def empty_headers_hash
@@ -57,7 +61,7 @@ module Headlines
     def formatted_headers
       return sanitized_headers unless sanitized_headers["public-key-pins-report-only"]
 
-      sanitized_headers.merge("public-key-pins" => "#{sanitized_headers['public-key-pins-report-only']};report-only")
+      sanitized_headers.merge!("public-key-pins" => "#{sanitized_headers['public-key-pins-report-only']};report-only")
     end
 
     def sanitized_headers
