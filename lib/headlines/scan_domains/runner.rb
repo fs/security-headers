@@ -29,27 +29,31 @@ module Headlines
       end
 
       def scan_domains(domains)
+        domain_responses = []
         hydra = Typhoeus::Hydra.hydra
 
         domains.each do |domain|
           request = Typhoeus::Request.new(
             "http://#{domain.name}",
+            headers: header_options,
             followlocation: true,
             maxredirs: 10,
-            timeout: 60,
-            connecttimeout: 10,
-            headers: header_options
+            timeout: 30,
+            connecttimeout: 10
           )
 
-          request.on_complete do |response|
-            analyze_and_save(domain, response)
-          end
-
+          request.on_complete { |response| domain_responses << [domain, response] }
           hydra.queue(request)
-          progressbar.increment
         end
 
         hydra.run
+
+        domain_responses.each do |dr|
+          domain = dr.first
+          response = dr.second
+          analyze_and_save(domain, response)
+          progressbar.increment
+        end
       rescue StandardError => exception
         failure_logger.info("Unhandled exception: #{exception}")
       end
@@ -71,7 +75,6 @@ module Headlines
             domain.build_last_scan(scan_params(result).merge(domain_id: domain.id, ssl_enabled: result.ssl_enabled))
             domain.save!
           else
-            binding.pry
             failure_logger.info("#{domain.label}: Failed to parse response")
           end
         end
@@ -86,6 +89,10 @@ module Headlines
       def log_scan_result(domain, response)
         logger.info("#{domain.label} scan result: #{response.success? ? 'success' : 'failure'}")
         return if response.success?
+
+        if !response.success? && response.code.to_s == "200"
+          binding.pry
+        end
 
         if response.timed_out?
           error_message = "Timed out"
