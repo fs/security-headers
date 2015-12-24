@@ -8,7 +8,7 @@ namespace :headlines do
 
   def total_count
     # SiteSetting.scan_domain_count || DEFAULT_DOMAINS_COUNT
-      100
+      1_000
   end
 
   def progressbar

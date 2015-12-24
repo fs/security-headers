@@ -5,7 +5,7 @@ require "typhoeus/adapters/faraday"
 module Headlines
   module ScanDomains
     class Runner
-      DEFAULT_BATCH_SIZE = 100
+      DEFAULT_BATCH_SIZE = 500
 
       def initialize(total_count, progressbar)
         @total_count = total_count
@@ -68,7 +68,7 @@ module Headlines
       end
 
       def analyze_and_save(domain, response)
-        if response.success?
+        if response.code == 200
           result = Headlines::AnalyzeDomainHeaders.call(url: domain.name, response: response)
 
           if result.success?
@@ -88,11 +88,7 @@ module Headlines
 
       def log_scan_result(domain, response)
         logger.info("#{domain.label} scan result: #{response.success? ? 'success' : 'failure'}")
-        return if response.success?
-
-        if !response.success? && response.code.to_s == "200"
-          binding.pry
-        end
+        return if response.code == 200
 
         if response.timed_out?
           error_message = "Timed out"
