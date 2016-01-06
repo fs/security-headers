@@ -3,27 +3,27 @@ module Headlines
     include Interactor
 
     def call
-      unless response.success?
-        context.status = response.status
+      unless response_code == 200
+        context.status = response_code
         context.fail!(message: I18n.t("errors.general"))
       end
 
-      context.ssl_enabled = response.env.url.scheme == "https"
+      context.ssl_enabled = URI(easy.last_effective_url).scheme == "https"
       context.headers = parse_headers.push(parse_csp)
     end
 
     private
 
-    def response
-      @response ||= connection.get
-    rescue Faraday::ClientError, URI::InvalidURIError, Errno::ETIMEDOUT, Faraday::SSLError => exception
+    def response_code
+      @response_code ||= easy.perform && easy.response_code
+    rescue StandardError => exception
       context.errors = exception.inspect
       error_i18n = exception.class.to_s.gsub("::", ".").downcase
       context.fail!(message: I18n.t("errors.#{error_i18n}", default: I18n.t("errors.general")))
     end
 
     def parse_csp
-      Headlines::SecurityHeaders::ContentSecurityPolicy.new(sanitized_headers, response.body, context.url)
+      Headlines::SecurityHeaders::ContentSecurityPolicy.new(sanitized_headers, easy.body_str, context.url)
     end
 
     def parse_headers
@@ -46,8 +46,12 @@ module Headlines
 
     def sanitized_headers
       @sanitized_headers ||= Hash[
-        response.headers.map { |k, v| [k, v.is_a?(String) ? v.force_encoding("iso8859-1").encode("utf-8") : v] }
+        response_headers.map { |k, v| [k, v.is_a?(String) ? v.force_encoding("iso8859-1").encode("utf-8") : v] }
       ]
+    end
+
+    def response_headers
+      easy.header_str.split(/[\r\n]+/)
     end
 
     def headers_to_analyze
@@ -58,28 +62,17 @@ module Headlines
       "Headlines::SecurityHeaders::#{header.titleize.gsub(' ', '')}".constantize
     end
 
-    def connection
-      Faraday.new(url: "http://#{context.url}", headers: header_options, request: request_options) do |builder|
-        builder.request :url_encoded
-        builder.use FaradayMiddleware::FollowRedirects, limit: 10
-        builder.adapter Faraday.default_adapter
+    def easy
+      @easy ||= Curl::Easy.new("http://#{context.url}") do |c|
+        c.headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+        c.headers["Accept-Encoding"] = "none"
+        c.headers["Accept-Language"] = "en-US,en;q=0.5"
+        c.headers["User-Agent"] = "Mozilla/5.0 AppleWebKit/537.36 Chrome/46.0.2490.71 Safari/537.36 Firefox/41.0"
+        c.follow_location = true
+        c.max_redirects = 10
+        c.timeout = 30
+        c.connect_timeout = 10
       end
-    end
-
-    def header_options
-      {
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        accept_encoding: "none",
-        accept_language: "en-US,en;q=0.5",
-        user_agent: "Mozilla/5.0 AppleWebKit/537.36 Chrome/46.0.2490.71 Safari/537.36 Firefox/41.0"
-      }
-    end
-
-    def request_options
-      {
-        timeout: 30,
-        open_timeout: 10
-      }
     end
   end
 end
