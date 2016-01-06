@@ -37,7 +37,7 @@ module Headlines
         while results.any?
           results.delete_if do |r|
             if r.rejected?
-              failure_logger.info("#{r.value.try(:effective_url)}: Failure reason: #{r.reason}")
+              failure_logger.info("#{r.value.try(:last_effective_url)}: Failure reason: #{r.reason}")
             end
 
             !r.pending?

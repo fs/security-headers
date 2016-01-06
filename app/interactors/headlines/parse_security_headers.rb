@@ -10,12 +10,18 @@ module Headlines
 
       context.ssl_enabled = URI(easy.last_effective_url).scheme == "https"
       context.headers = parse_headers.push(parse_csp)
+      easy.close
     end
 
     private
 
     def response_code
-      @response_code ||= easy.perform && easy.response_code
+      if @response_code.blank?
+        @response_code = easy.perform && easy.response_code
+        context.total_time = easy.total_time
+      end
+
+      @response_code
     rescue StandardError => exception
       context.errors = exception.inspect
       error_i18n = exception.class.to_s.gsub("::", ".").downcase

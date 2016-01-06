@@ -1,3 +1,8 @@
+require_relative './../../../app/interactors/headlines/parse_security_headers'
+require_relative './../../../app/interactors/headlines/generate_results'
+require_relative './../../../app/interactors/headlines/analyze_domain_headers'
+require_relative './../../../app/models/headlines/scan'
+
 module Headlines
   module ScanDomains
     class Scanner
@@ -8,7 +13,7 @@ module Headlines
       end
 
       def scan!
-        result = AnalyzeDomainHeaders.call(url: domain.name)
+        result = Headlines::AnalyzeDomainHeaders.call(url: domain.name)
 
         if result.success?
           domain.build_last_scan(scan_params(result).merge!(domain_id: domain.id, ssl_enabled: result.ssl_enabled))
@@ -27,7 +32,9 @@ module Headlines
       end
 
       def log_scan_result(domain, result)
-        logger.info("#{domain.label} scan result: #{result.success? ? 'success' : 'failure'}")
+        message = "#{domain.label}: #{result.success? ? 'success' : 'failure'}"
+        message =  "#{message} (total_time: #{result.total_time})" if result.total_time.present?
+        logger.info(message)
         return if result.success?
 
         if result.status.present?
